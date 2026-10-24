@@ -1,0 +1,5 @@
+CINEMIX project source export
+
+Includes source code, assets, tests, dependency lockfiles and project configuration.
+Excludes environment secrets, OAuth/session credentials, local runtime JSON data, database files, Git history, installed dependencies, caches and compiled outputs.
+This archive is not a production database backup. Reconfigure secrets and install dependencies before running.

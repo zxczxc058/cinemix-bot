@@ -1,0 +1,13 @@
+[project]
+name = "telegram-faq-bot"
+version = "0.1.0"
+description = "A Telegram bot that answers common questions from a local FAQ file."
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg[binary]>=3.2,<4",
+    "pyrofork>=2.3.69",
+    "pytelegrambotapi>=4.37.0",
+    "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
+    "tgcrypto>=1.2.5",
+]
