@@ -4,3 +4,4 @@ python-dotenv
 yt-dlp
 aiohttp
 flask
+pyTelegramBotAPI
