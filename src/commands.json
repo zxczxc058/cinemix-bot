@@ -1,0 +1,12 @@
+{
+  "responses": {
+    "start": {
+      "text": "ברוך הבא!",
+      "buttons": []
+    }
+  },
+  "start_message": {
+    "text": "ברוך הבא!",
+    "buttons": []
+  }
+}
