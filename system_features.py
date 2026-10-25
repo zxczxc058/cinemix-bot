@@ -89,29 +89,21 @@ def update_maintenance_message(text, path=SYSTEM_SETTINGS_FILE):
         data["maintenance_message"] = text
         write_json(path, data)
 
-
 def load_activity(path=ACTIVITY_FILE):
-    with _ACTIVITY_LOCK:
-        from persistent_json import read_json_text
-        data = json.loads(read_json_text(path))
-        if not isinstance(data, dict) or not isinstance(data.get("days"), dict):
-            raise ValueError("Invalid hourly activity data.")
-        sent = data.get("sent_today", {})
-        if not isinstance(sent, dict):
-            raise ValueError("Invalid daily outbound activity data.")
-        for date, count in sent.items():
-            datetime.strptime(date, "%Y-%m-%d")
-            if type(count) is not int or count < 0:
-                raise ValueError("Invalid daily outbound activity count.")
-        for date, counts in data["days"].items():
-            datetime.strptime(date, "%Y-%m-%d")
-            if (
-                not isinstance(counts, list) or len(counts) != 24
-                or any(type(count) is not int or count < 0 for count in counts)
-            ):
-                raise ValueError("Invalid hourly activity counters.")
-        return data
-
+    try:
+        with _ACTIVITY_LOCK:
+            from persistent_json import read_json_text
+            raw = read_json_text(path)
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return {"sent_today": {}, "days": {}}
+            if "sent_today" not in data:
+                data["sent_today"] = {}
+            if "days" not in data:
+                data["days"] = {}
+            return data
+    except Exception:
+        return {"sent_today": {}, "days": {}}
 
 def record_sent_message(count=1, path=ACTIVITY_FILE, now=None):
     """Persist successful outbound Telegram messages by Israel calendar day."""
