@@ -1,24 +1,10 @@
-app = 'cinemix-bot'
-primary_region = 'ams'
-
-[build]
-  dockerfile = "Dockerfile"
-
-[env]
-  BOT_STORAGE = "json"
+app = "cinemix-bot"
+primary_region = "ams"
 
 [processes]
-  app = "python src/main.py"
-
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = false
-  auto_start_machines = true
-  min_machines_running = 1
+app = "python src/main.py"
 
 [[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
-  cpus = 1
-  memory_mb = 256
+cpu_kind = "shared"
+cpus = 1
+memory = "512mb"
