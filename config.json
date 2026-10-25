@@ -1,1 +1,6 @@
-{}
+{
+  "default_response": "לא מצאתי תשובה מתאימה. אפשר לנסות מילת מפתח אחרת?",
+  "main_group_id": null,
+  "channel_id": null,
+  "admin_chat_id": null
+}
