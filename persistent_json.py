@@ -96,7 +96,6 @@ def _mirror(path, data):
 
 def read_json_text(path):
     path = Path(path)
-    # AUTO-CREATE missing local files - this is the fix
     if not _managed(path):
         if not path.exists():
             default = _default_content(path.name)
@@ -176,3 +175,25 @@ def initialize_storage():
                 _mirror(DATA_ROOT / name, data)
         logging.info("Persistent bot storage loaded (%s JSON documents).", len(rows))
         return len(rows)
+
+def complete_cinemix_telegram_link(token, user):
+    import re
+    if not postgres_enabled():
+        raise RuntimeError("Telegram account linking requires PostgreSQL-backed bot storage.")
+    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+        return False
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        return False
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    username = getattr(user, "username", None)
+    first_name = getattr(user, "first_name", None)
+    last_name = getattr(user, "last_name", None)
+    with _LOCK:
+        db = _database()
+        link = db.execute(
+            """SELECT id, device_key FROM cinemix_login_activity
+               WHERE link_token_hash=%s AND link_expires_at>now()""",
+            (token_hash,),
+        ).fetchone()
+        if link is
