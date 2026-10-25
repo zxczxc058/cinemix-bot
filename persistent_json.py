@@ -101,6 +101,15 @@ def _mirror(path, data):
 def read_json_text(path):
     path = Path(path)
     if not _managed(path):
+                if not path.exists():
+            if path.name == "tasks.json":
+                default = {"tasks": []}
+            elif path.name == "backup_state.json":
+                default = {"backups": [], "last_backup": None}
+            else:
+                default = {}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(default, ensure_ascii=False, indent=2), encoding="utf-8")
         return path.read_text(encoding="utf-8")
     with _LOCK:
         row = _database().execute(
