@@ -1,9 +1,4 @@
-"""PostgreSQL-backed JSON documents with local mirrors for existing backups.
-
-Production uses BOT_STORAGE=postgres. Temporary/test paths remain file-backed.
-Schema is created in development and applied to production by Replit Publish;
-this module deliberately contains no runtime DDL.
-"""
+"""PostgreSQL-backed JSON documents with local mirrors for existing backups."""
 
 import hashlib
 import json
@@ -28,16 +23,24 @@ DOCUMENT_NAMES = frozenset({
     "private_inbox_delivery.json",
     "web_streams.json",
 })
+
+def _default_content(name):
+    if name == "tasks.json":
+        return {"tasks": []}
+    if name in {"groups.json", "users.json", "media_db.json", "vip_media_db.json", "commands.json"}:
+        return []
+    if name == "backup_state.json":
+        return {"backups": [], "last_backup": None}
+    return {}
+
 _LOCK = threading.RLock()
 _connection = None
-
 
 def postgres_enabled():
     mode = os.environ.get("BOT_STORAGE", "json")
     if mode not in {"json", "postgres"}:
         raise RuntimeError("BOT_STORAGE must be json or postgres.")
     return mode == "postgres"
-
 
 def _managed(path):
     path = Path(path).resolve()
@@ -46,7 +49,6 @@ def _managed(path):
         and path.parent == DATA_ROOT
         and path.name in DOCUMENT_NAMES
     )
-
 
 def _database():
     global _connection
@@ -58,7 +60,6 @@ def _database():
         _connection = psycopg.connect(url, autocommit=True, connect_timeout=10)
     return _connection
 
-
 def close_storage():
     global _connection
     with _LOCK:
@@ -66,9 +67,7 @@ def close_storage():
             _connection.close()
             _connection = None
 
-
 def hidden_drive_file_ids():
-    """Catalogue imports must not resurrect portal-admin deletions."""
     if not postgres_enabled():
         return set()
     db = _database()
@@ -78,9 +77,7 @@ def hidden_drive_file_ids():
         "SELECT file_id FROM cinemix_drive_movies WHERE hidden = true"
     ).fetchall()}
 
-
 def _mirror(path, data):
-    """Atomic local export; database commits are the authoritative source."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
@@ -97,10 +94,14 @@ def _mirror(path, data):
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 
-
 def read_json_text(path):
     path = Path(path)
+    # AUTO-CREATE missing local files - this is the fix
     if not _managed(path):
+        if not path.exists():
+            default = _default_content(path.name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(default, ensure_ascii=False, indent=2), encoding="utf-8")
         return path.read_text(encoding="utf-8")
     with _LOCK:
         row = _database().execute(
@@ -108,10 +109,12 @@ def read_json_text(path):
             (path.name,),
         ).fetchone()
         if row is None:
-            # Missing documents may be added by a new feature. Never overwrite
-            # existing database records with older bundled JSON.
             from psycopg.types.json import Jsonb
-            seed = json.loads(path.read_text(encoding="utf-8"))
+            try:
+                seed = json.loads(path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                seed = _default_content(path.name)
+                path.write_text(json.dumps(seed, ensure_ascii=False, indent=2), encoding="utf-8")
             _database().execute(
                 "INSERT INTO telegram_bot_documents (name, body) VALUES (%s, %s) "
                 "ON CONFLICT (name) DO NOTHING",
@@ -123,7 +126,6 @@ def read_json_text(path):
             ).fetchone()
         return json.dumps(row[0], ensure_ascii=False)
 
-
 def write_json_document(path, data):
     path = Path(path)
     with _LOCK:
@@ -131,8 +133,6 @@ def write_json_document(path, data):
             _mirror(path, data)
             return
         from psycopg.types.json import Jsonb
-        # Commit synchronously before returning success to the administrator.
-        # A DB outage must fail explicitly, never silently save only to disk.
         _database().execute(
             "INSERT INTO telegram_bot_documents (name, body) VALUES (%s, %s) "
             "ON CONFLICT (name) DO UPDATE SET body = EXCLUDED.body, "
@@ -144,15 +144,12 @@ def write_json_document(path, data):
         except OSError:
             logging.warning("Database saved %s; local backup mirror could not be refreshed.", path.name)
 
-
 def initialize_storage():
-    """Seed missing documents once; restore authoritative records on every boot."""
     if not postgres_enabled():
         return 0
     from psycopg.types.json import Jsonb
     with _LOCK:
         db = _database()
-        # One atomic seed transaction; invalid JSON aborts the entire import.
         with db.transaction():
             existing = {
                 row[0] for row in db.execute(
@@ -165,69 +162,17 @@ def initialize_storage():
                 path = DATA_ROOT / name
                 if path.exists():
                     data = json.loads(path.read_text(encoding="utf-8"))
-                    db.execute(
-                        "INSERT INTO telegram_bot_documents (name, body) VALUES (%s, %s) "
-                        "ON CONFLICT (name) DO NOTHING",
-                        (name, Jsonb(data)),
-                    )
+                else:
+                    data = _default_content(name)
+                    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                db.execute(
+                    "INSERT INTO telegram_bot_documents (name, body) VALUES (%s, %s) "
+                    "ON CONFLICT (name) DO NOTHING",
+                    (name, Jsonb(data)),
+                )
         rows = db.execute("SELECT name, body FROM telegram_bot_documents").fetchall()
         for name, data in rows:
             if name in DOCUMENT_NAMES:
                 _mirror(DATA_ROOT / name, data)
         logging.info("Persistent bot storage loaded (%s JSON documents).", len(rows))
         return len(rows)
-
-
-def complete_cinemix_telegram_link(token, user):
-    """Consume a short-lived portal link and attach the verified Telegram identity."""
-    import re
-
-    if not postgres_enabled():
-        raise RuntimeError("Telegram account linking requires PostgreSQL-backed bot storage.")
-    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
-        return False
-    user_id = getattr(user, "id", None)
-    if user_id is None:
-        return False
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    username = getattr(user, "username", None)
-    first_name = getattr(user, "first_name", None)
-    last_name = getattr(user, "last_name", None)
-    with _LOCK:
-        db = _database()
-        link = db.execute(
-            """SELECT id, device_key FROM cinemix_login_activity
-               WHERE link_token_hash=%s AND link_expires_at>now()""",
-            (token_hash,),
-        ).fetchone()
-        if link is None:
-            return False
-        updated = db.execute(
-            """UPDATE cinemix_login_activity
-               SET telegram_user_id=%s, telegram_username=%s,
-                   telegram_first_name=%s, telegram_last_name=%s,
-                   link_token_hash=NULL, link_expires_at=NULL
-               WHERE id=%s AND link_token_hash=%s AND link_expires_at>now()
-               RETURNING id""",
-            (str(user_id), username, first_name, last_name, link[0], token_hash),
-        ).fetchone()
-        if updated is None:
-            return False
-        # Backfill this device's earlier code-only logins once its owner proves
-        # control of the Telegram account. Future logins inherit the same link.
-        db.execute(
-            """UPDATE cinemix_login_activity
-               SET telegram_user_id=%s, telegram_username=%s,
-                   telegram_first_name=%s, telegram_last_name=%s
-               WHERE device_key=%s AND telegram_user_id IS NULL""",
-            (str(user_id), username, first_name, last_name, link[1]),
-        )
-        return True
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    try:
-        print(f"Persistent documents initialized: {initialize_storage()}")
-    finally:
-        close_storage()
